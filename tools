@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# =========================================================
+# Raspberry Pi Setup Script
+# - Configures static IP address
+# - Installs basic tools (net-tools, python3)
+# =========================================================
+# Author: Steven Hanks
+# =========================================================
+
+set -euo pipefail
+
+# ---- CONFIG ----
+IFACE="wlan0"                     # change to eth0 if using Ethernet
+STATIC_IP="192.168.1.106/24"
+GATEWAY="192.168.1.1"
+DNS1="1.1.1.1"
+DNS2="8.8.8.8"
+SSID="4DF Net 3"
+PASSWORD="psyopPSYOP@@"
+NETPLAN_FILE="/etc/netplan/50-cloud-init.yaml"
+# ----------------
+
+echo "=== Raspberry Pi Setup Starting ==="
+
+# ---- 1. Require sudo ----
+if [ "$EUID" -ne 0 ]; then
+  echo "[!] Please run as root (use: sudo bash setup.sh)"
+  exit 1
+fi
+
+# ---- 2. Install prerequisites ----
+echo "[*] Updating packages and installing net-tools + python3..."
+apt-get update -y
+apt-get install -y net-tools python3
+
+# ---- 3. Write netplan config ----
+echo "[*] Configuring static IP..."
+cat > "$NETPLAN_FILE" <<EOF
+network:
+  version: 2
+  renderer: networkd
+  wifis:
+    ${IFACE}:
+      dhcp4: no
+      addresses:
+        - ${STATIC_IP}
+      routes:
+        - to: default
+          via: ${GATEWAY}
+      nameservers:
+        addresses:
+          - ${DNS1}
+          - ${DNS2}
+      access-points:
+        "${SSID}":
+          password: "${PASSWORD}"
+EOF
+
+# ---- 4. Apply network settings ----
+echo "[*] Applying network configuration..."
+netplan apply || (echo "[!] netplan apply failed — check syntax!" && exit 1)
+
+# ---- 5. Verify installs ----
+echo "[*] Verifying tools..."
+command -v python3 >/dev/null 2>&1 && echo "  ✓ Python3 installed"
+command -v ifconfig >/dev/null 2>&1 && echo "  ✓ net-tools installed"
+
+# ---- 6. Confirm network info ----
+echo "[*] Current IP info:"
+ip a show "$IFACE"
+
+echo "=== Setup Complete! ==="

@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # =========================================================
 # Raspberry Pi Setup Script
-# - Configures static IP address
-# - Installs basic tools (net-tools, python3)
+# - Assigns static IP dynamically via parameter (101–116)
+# - Installs required tools: net-tools, python3, systemd-networkd
+# - Designed for direct GitHub execution (curl | bash)
 # =========================================================
 # Author: Steven Hanks
+# Repository: https://github.com/osd-gitme/piSetup
 # =========================================================
 
 set -euo pipefail
 
 # ---- CONFIG ----
-IFACE="wlan0"                     # change to eth0 if using Ethernet
-STATIC_IP="192.168.1.106/24"
+NETWORK_IFACE="wlan0"        # Change to eth0 for wired setups
+BASE_IP="192.168.1"
 GATEWAY="192.168.1.1"
 DNS1="1.1.1.1"
 DNS2="8.8.8.8"
@@ -20,27 +22,44 @@ PASSWORD="psyopPSYOP@@"
 NETPLAN_FILE="/etc/netplan/50-cloud-init.yaml"
 # ----------------
 
-echo "=== Raspberry Pi Setup Starting ==="
+# ---- 1. Parse & validate IP input ----
+if [[ $# -lt 1 ]]; then
+  read -rp "Enter last octet for static IP (101–116): " LAST_OCTET
+else
+  LAST_OCTET="$1"
+fi
 
-# ---- 1. Require sudo ----
-if [ "$EUID" -ne 0 ]; then
-  echo "[!] Please run as root (use: sudo bash setup.sh)"
+# Validate range (101–116)
+if ! [[ "$LAST_OCTET" =~ ^[0-9]+$ ]] || (( LAST_OCTET < 101 || LAST_OCTET > 116 )); then
+  echo "[!] Invalid IP range. Please choose a value between 101 and 116."
   exit 1
 fi
 
-# ---- 2. Install prerequisites ----
-echo "[*] Updating packages and installing net-tools + python3..."
-apt-get update -y
-apt-get install -y net-tools python3
+STATIC_IP="${BASE_IP}.${LAST_OCTET}/24"
 
-# ---- 3. Write netplan config ----
-echo "[*] Configuring static IP..."
+echo "=== Raspberry Pi Static IP Setup ==="
+echo "[*] Configuring static IP: ${STATIC_IP}"
+
+# ---- 2. Require sudo ----
+if [[ $EUID -ne 0 ]]; then
+  echo "[!] Please run as root (use: sudo bash setup.sh <octet>)"
+  exit 1
+fi
+
+# ---- 3. Install dependencies ----
+echo "[*] Installing dependencies (net-tools, python3, systemd-networkd)..."
+apt-get update -y
+apt-get install -y net-tools python3 systemd-networkd
+
+# ---- 4. Write netplan configuration ----
+echo "[*] Writing Netplan config to ${NETPLAN_FILE}..."
+
 cat > "$NETPLAN_FILE" <<EOF
 network:
   version: 2
   renderer: networkd
   wifis:
-    ${IFACE}:
+    ${NETWORK_IFACE}:
       dhcp4: no
       addresses:
         - ${STATIC_IP}
@@ -56,17 +75,25 @@ network:
           password: "${PASSWORD}"
 EOF
 
-# ---- 4. Apply network settings ----
-echo "[*] Applying network configuration..."
-netplan apply || (echo "[!] netplan apply failed — check syntax!" && exit 1)
+# ---- 5. Apply network changes ----
+echo "[*] Enabling and starting network service..."
+systemctl enable --now systemd-networkd || true
 
-# ---- 5. Verify installs ----
-echo "[*] Verifying tools..."
-command -v python3 >/dev/null 2>&1 && echo "  ✓ Python3 installed"
-command -v ifconfig >/dev/null 2>&1 && echo "  ✓ net-tools installed"
+echo "[*] Applying Netplan..."
+netplan apply || (echo "[!] Netplan apply failed — check indentation or Wi-Fi config." && exit 1)
 
-# ---- 6. Confirm network info ----
-echo "[*] Current IP info:"
-ip a show "$IFACE"
+# ---- 6. Verify results ----
+echo "[*] Verifying tools and network..."
+sleep 3
 
-echo "=== Setup Complete! ==="
+echo "Installed tools:"
+command -v ifconfig >/dev/null && echo "  ✓ net-tools installed" || echo "  ✗ net-tools missing"
+command -v python3 >/dev/null && echo "  ✓ python3 installed" || echo "  ✗ python3 missing"
+
+echo
+echo "[*] Current network state for ${NETWORK_IFACE}:"
+ip a show "${NETWORK_IFACE}" | grep "inet " || echo "[!] No IP assigned (check Wi-Fi credentials)."
+
+echo
+echo "✅ Setup complete! This Pi now has static IP ${STATIC_IP}"
+

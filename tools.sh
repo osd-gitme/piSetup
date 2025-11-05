@@ -2,33 +2,7 @@
 # =========================================================
 # Raspberry Pi Setup Script
 # - Assigns static IP dynamically via parameter (101–116)
-# - Installs required tools: net-tools, python3
-# - Ensures network service is active (systemd-networkd or fallback)
-# - Designed for Git clone or curl execution
-# =========================================================
-# Author: Steven Hanks
-# Repository: https://github.com/osd-gitme/piSetup
-# =========================================================
-
-set -euo pipefail
-
-# ---- CONFIG ----
-NETWORK_IFACE="wlan0"        # Change to eth0 for wired setups
-BASE_IP="192.168.1"
-GATEWAY="192.168.1.1"
-DNS1="1.1.1.1"
-DNS2="8.8.8.8"
-SSID="4DF Net 3"
-PASSWORD="psyopPSYOP@@"
-NETPLAN_FILE="/etc/netplan/50-cloud-init.yaml"
-# ----------------
-
-# ---- 1. Parse & validate IP input ----
-if [[#!/usr/bin/env bash
-# =========================================================
-# Raspberry Pi Setup Script
-# - Assigns static IP dynamically via parameter (101–116)
-# - Installs required tools: net-tools, python3
+# - Installs required tools: net-tools, python3, OpenSSH
 # - Ensures network service is active (systemd-networkd or fallback)
 # - Designed for Git clone or curl execution
 # =========================================================
@@ -87,45 +61,20 @@ else
 fi
 
 # Enable network service if present
- $# -lt 1 ]]; then
-  read -rp "Enter last octet for static IP (101–116): " LAST_OCTET
-else
-  LAST_OCTET="$1"
-fi
-
-# Validate range (101–116)
-if ! [[ "$LAST_OCTET" =~ ^[0-9]+$ ]] || (( LAST_OCTET < 101 || LAST_OCTET > 116 )); then
-  echo "[!] Invalid IP range. Please choose a value between 101 and 116."
-  exit 1
-fi
-
-STATIC_IP="${BASE_IP}.${LAST_OCTET}/24"
-
-echo "=== Raspberry Pi Static IP Setup ==="
-echo "[*] Configuring static IP: ${STATIC_IP}"
-
-# ---- 2. Require sudo ----
-if [[ $EUID -ne 0 ]]; then
-  echo "[!] Please run as root (use: sudo bash tools <octet>)"
-  exit 1
-fi
-
-# ---- 3. Install dependencies ----
-echo "[*] Installing dependencies (net-tools, python3, network service)..."
-apt-get update -y
-apt-get install -y net-tools python3 || true
-
-# Try to install or verify systemd-networkd
-if apt-cache show systemd-networkd >/dev/null 2>&1; then
-  apt-get install -y systemd-networkd
-  echo "[*] systemd-networkd package installed or already present."
-else
-  echo "[i] systemd-networkd package not found — assuming service is included."
-fi
-
-# Enable network service if present
 systemctl enable systemd-networkd 2>/dev/null || echo "[i] systemd-networkd enable skipped."
 systemctl start systemd-networkd 2>/dev/null || echo "[i] systemd-networkd start skipped."
+
+# ---- 3B. Ensure OpenSSH Server is installed and enabled ----
+if ! dpkg -s openssh-server >/dev/null 2>&1; then
+  echo "[*] Installing OpenSSH Server..."
+  apt-get install -y openssh-server
+else
+  echo "[i] OpenSSH Server already installed."
+fi
+
+echo "[*] Enabling and starting SSH service..."
+systemctl enable ssh 2>/dev/null || echo "[i] SSH enable skipped."
+systemctl start ssh 2>/dev/null || echo "[i] SSH start skipped."
 
 # ---- 4. Write netplan configuration ----
 echo "[*] Writing Netplan config to ${NETPLAN_FILE}..."
@@ -166,6 +115,14 @@ sleep 3
 echo "Installed tools:"
 command -v ifconfig >/dev/null && echo "  ✓ net-tools installed" || echo "  ✗ net-tools missing"
 command -v python3 >/dev/null && echo "  ✓ python3 installed" || echo "  ✗ python3 missing"
+
+echo
+echo "SSH status:"
+if systemctl is-active --quiet ssh; then
+  echo "  ✓ OpenSSH service is active and running"
+else
+  echo "  ✗ SSH service not running — check with 'sudo systemctl status ssh'"
+fi
 
 echo
 echo "[*] Current network state for ${NETWORK_IFACE}:"
